@@ -1,0 +1,41 @@
+name: mirror-stairs26
+on: workflow_dispatch
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      URL: https://zenodo.org/api/records/18171005/files/32ch_audio_dev.zip/content
+      SIZE: "25040345245"
+      PART: "1900000000"
+      TAG: stairs26-32ch
+    steps:
+      - name: Create release
+        run: |
+          gh release create "$TAG" -R "$GITHUB_REPOSITORY" --title "$TAG" \
+            --notes "Unmodified 32ch_audio_dev.zip from https://doi.org/10.5281/zenodo.18171005 (MIT license), split into parts. Restore: cat 32ch_audio_dev.zip.part* > 32ch_audio_dev.zip (md5 6de3a12ddec8d344b4b599b413e4061e)" || true
+
+      - name: Download from Zenodo part by part and upload to the release
+        run: |
+          set -euo pipefail
+          i=0; start=0
+          : > parts.md5
+          while [ "$start" -lt "$SIZE" ]; do
+            end=$(( start + PART - 1 ))
+            if [ "$end" -ge "$SIZE" ]; then end=$(( SIZE - 1 )); fi
+            name=$(printf '32ch_audio_dev.zip.part%02d' "$i")
+            curl -fL --retry 10 --retry-all-errors -r "$start-$end" -o "$name" "$URL"
+            test "$(stat -c %s "$name")" -eq $(( end - start + 1 ))
+            md5sum "$name" >> parts.md5
+            gh release upload "$TAG" "$name" -R "$GITHUB_REPOSITORY" --clobber
+            rm "$name"
+            echo "uploaded $name"
+            i=$(( i + 1 )); start=$(( end + 1 ))
+          done
+          curl -fL -o LICENSE https://zenodo.org/api/records/18171005/files/LICENSE/content
+          gh release upload "$TAG" parts.md5 LICENSE -R "$GITHUB_REPOSITORY" --clobber
